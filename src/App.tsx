@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { supabase, getCurrentUser, signOut, checkSupabaseConnection, onAuthStateChange } from './lib/supabase';
+import  { useState, useEffect } from 'react';
+import {  getCurrentUser, signOut, checkSupabaseConnection, onAuthStateChange } from './lib/supabase';
 import CustomerView from './components/CustomerView';
 import AdminView from './components/AdminView';
 import LoginModal from './components/LoginModal';
@@ -11,7 +11,7 @@ function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [viewMode, setViewMode] = useState<'customer' | 'admin'>('customer');
-  const [showUIDemo, setShowUIDemo] = useState(false);
+  const [showUIDemo] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -111,12 +111,7 @@ function App() {
             <div className="flex items-center space-x-4">
               {user ? (
                 <>
-                  <button
-                    onClick={() => setShowUIDemo(!showUIDemo)}
-                    className="px-4 py-2 text-sm text-luxury-softWhite hover:text-luxury-white transition-all duration-300 border border-luxury-gold/30 rounded-lg hover:border-luxury-gold hover:bg-luxury-gold/10 hover:shadow-lg hover:shadow-luxury-gold/20"
-                  >
-                    {showUIDemo ? 'Hide UI Demo' : 'Show UI Demo'}
-                  </button>
+                 
                   {isAdmin && (
                     <div className="flex rounded-lg bg-luxury-charcoal p-1 shadow-sm">
                       <button
