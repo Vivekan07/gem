@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Products collection rules
+    match /products/{productId} {
+      // Allow read access to all users (for customer view)
+      allow read: if true;
+      
+      // Allow write access to any authenticated user
+      // For production: restrict this to specific admin emails
+      allow write: if request.auth != null;
+    }
+    
+    // Admin-only collections (if needed in the future)
+    match /admin/{document=**} {
+      allow read, write: if request.auth != null && 
+                            request.auth.token.email != null &&
+                            (request.auth.token.email.matches('.*@rishvigems\\.com') ||
+                             request.auth.token.email == 'nixsala27@gmail.com');
+    }
+    
+    // User profiles (if implemented in the future)
+    match /users/{userId} {
+      // Users can read/write their own data
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Admins can read all user data
+      allow read: if request.auth != null && 
+                     request.auth.token.email != null &&
+                     (request.auth.token.email.matches('.*@rishvigems\\.com') ||
+                      request.auth.token.email == 'nixsala27@gmail.com');
+    }
+    
+    // Orders collection (if implemented in the future)
+    match /orders/{orderId} {
+      // Users can read their own orders
+      allow read: if request.auth != null && 
+                     resource.data.userId == request.auth.uid;
+      
+      // Users can create new orders
+      allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Admins can read all orders and update order status
+      allow read, write: if request.auth != null && 
+                            request.auth.token.email != null &&
+                            (request.auth.token.email.matches('.*@rishvigems\\.com') ||
+                             request.auth.token.email == 'nixsala27@gmail.com');
+    }
+    
+    // Default deny rule for any other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
