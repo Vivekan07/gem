@@ -1,6 +1,6 @@
 import React from 'react';
 import { type Product } from '../lib/supabase';
-import { Star, Heart, Eye, ShoppingBag } from 'lucide-react';
+import { Star, Heart, Eye, } from 'lucide-react';
 
 interface ProductCardProps {
   product: Product;
@@ -32,7 +32,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onImageClick }) => {
             </span>
           ) : (
             <span className="bg-luxury-gold text-luxury-black px-4 py-2 rounded-full text-xs font-bold shadow-lg animate-glow">
-              Available
+              For Sale
             </span>
           )}
         </div>

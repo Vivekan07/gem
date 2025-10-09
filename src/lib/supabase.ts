@@ -1,7 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, limit, Timestamp, DocumentData, QueryConstraint, getDoc } from 'firebase/firestore';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getStorage, ref, deleteObject, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { uploadToCloudinary, deleteFromCloudinary, uploadFromUrl, isCloudinaryUrl, isFirebaseStorageUrl } from './cloudinary';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -116,26 +117,43 @@ const documentToProduct = (doc: DocumentData): Product => {
   };
 };
 
-// Demo data for fallback - Starting with empty product list
-// You can add new products through the admin panel
-const getDemoData = (): Product[] => [
-  // Empty array - add your new products through the admin panel
-  // Example product structure (remove this comment when adding real products):
-  /*
-  {
-    id: 'product-1',
-    name: 'Your Product Name',
-    description: 'Your product description',
-    price: 0,
-    category: 'necklace', // or 'aharam', 'earings', 'bangles', 'bridal collection'
-    function_type: 'kovil', // or 'birthday party', 'preshoot', 'postshoot', 'bridetobe', 'mehindi'
-    image_url: '/path/to/your/image.jpg',
-    is_for_sale: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+// No demo data - fetch directly from Firebase
+
+// Product count operations
+export const getProductCounts = async (): Promise<{
+  total: number;
+  forSale: number;
+  forRent: number;
+  categories: number;
+}> => {
+  if (!db) {
+    console.error('❌ Firebase not configured. Cannot fetch product counts.');
+    throw new Error('Firebase database not initialized. Please check your configuration.');
   }
-  */
-];
+
+  try {
+    console.log('📊 Fetching product counts from Firebase...');
+    
+    const productsRef = collection(db, 'products');
+    
+    // Get all products for counting
+    const querySnapshot = await getDocs(query(productsRef));
+    const allProducts = querySnapshot.docs.map(documentToProduct);
+    
+    const counts = {
+      total: allProducts.length,
+      forSale: allProducts.filter(p => p.is_for_sale).length,
+      forRent: allProducts.filter(p => !p.is_for_sale).length,
+      categories: new Set(allProducts.map(p => p.category)).size
+    };
+    
+    console.log(`📊 Product counts:`, counts);
+    return counts;
+  } catch (error) {
+    console.error('❌ Firebase count fetch failed:', error);
+    throw new Error(`Failed to fetch product counts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+};
 
 // Product operations
 export const getProducts = async (
@@ -144,117 +162,120 @@ export const getProducts = async (
   showSalesOnly?: boolean
 ): Promise<Product[]> => {
   if (!db) {
-    console.info('📊 Using demo data - Firebase not configured');
-    let demoData = getDemoData();
-    
-    // Apply demo filtering
-    if (category && category !== 'all') {
-      demoData = demoData.filter(product => product.category === category);
-    }
-    if (searchTerm) {
-      demoData = demoData.filter(product =>
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.description.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    if (showSalesOnly) {
-      demoData = demoData.filter(product => !product.is_for_sale);
-    }
-    
-    return demoData;
+    console.error('❌ Firebase not configured. Cannot fetch products.');
+    throw new Error('Firebase database not initialized. Please check your configuration.');
   }
 
   try {
+    console.log('🔥 Fetching products from Firebase...');
+    console.log(`🔍 Filter parameters: category="${category}", search="${searchTerm}", salesOnly=${showSalesOnly}`);
+    
     const productsRef = collection(db, 'products');
     const constraints: QueryConstraint[] = [];
 
-    // Apply category filter
-    if (category && category !== 'all') {
-      constraints.push(where('category', '==', category));
-    }
+    // Apply category filter (client-side for now to avoid index issues)
+    // if (category && category !== 'all') {
+    //   console.log(`🏷️ Adding category filter: ${category}`);
+    //   constraints.push(where('category', '==', category));
+    // }
 
     // Apply sales filter
     if (showSalesOnly) {
+      console.log(`👁️ Adding rent-only filter`);
       constraints.push(where('is_for_sale', '==', false));
     }
 
-    // Add ordering and limit
+    // Add ordering
     constraints.push(orderBy('created_at', 'desc'));
-    constraints.push(limit(20));
 
     const q = query(productsRef, ...constraints);
     const querySnapshot = await getDocs(q);
     
     let products = querySnapshot.docs.map(documentToProduct);
+    console.log(`📦 Fetched ${products.length} products from Firebase`);
+
+    // Apply category filter (client-side to avoid index issues)
+    if (category && category !== 'all') {
+      console.log(`🏷️ Applying category filter client-side: ${category}`);
+      const beforeCount = products.length;
+      products = products.filter(product => product.category === category);
+      console.log(`🏷️ Category filter reduced results from ${beforeCount} to ${products.length}`);
+    }
 
     // Apply search term filter (client-side since Firestore doesn't have full-text search)
     if (searchTerm && searchTerm.trim().length >= 3) {
+      console.log(`🔍 Applying search filter: ${searchTerm}`);
       const searchLower = searchTerm.toLowerCase();
+      const beforeCount = products.length;
       products = products.filter(product =>
         product.name.toLowerCase().includes(searchLower) ||
         product.description.toLowerCase().includes(searchLower)
       );
+      console.log(`🔍 Search reduced results from ${beforeCount} to ${products.length}`);
     }
 
+    console.log(`✅ Returning ${products.length} filtered products`);
     return products;
   } catch (error) {
-    console.warn('⚠️ Database connection failed, using demo data:', error);
-    return getDemoData();
+    console.error('❌ Firebase fetch failed:', error);
+    throw new Error(`Failed to fetch products: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
 
-// Image storage operations
+// Image storage operations - Using Cloudinary
 export const uploadImageToStorage = async (file: File): Promise<string> => {
-  if (!storage) {
-    console.warn('📁 Image upload not available - using default image');
-    return '/WhatsApp Image 2025-09-29 at 16.29.12_6c59f301 copy copy copy.jpg';
-  }
-
+  console.log('📤 Uploading image to Cloudinary...');
+  
   try {
-    // Create unique filename
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = `products/${fileName}`;
-
-    // Upload file to Firebase Storage
-    const storageRef = ref(storage, filePath);
-    const snapshot = await uploadBytes(storageRef, file);
+    // Upload to Cloudinary
+    const cloudinaryUrl = await uploadToCloudinary(file, 'products');
+    console.log('✅ Image uploaded successfully to Cloudinary:', cloudinaryUrl);
     
-    // Get download URL
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    
-    return downloadURL;
+    return cloudinaryUrl;
   } catch (error) {
-    console.error('📁 Image upload failed, using default:', error);
-    return '/WhatsApp Image 2025-09-29 at 16.29.12_6c59f301 copy copy copy.jpg';
+    console.error('❌ Failed to upload image:', error);
+    throw new Error(`Failed to upload image: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
 
 export const deleteImageFromStorage = async (imageUrl: string): Promise<void> => {
-  if (!storage || !imageUrl.includes('firebase')) {
-    return; // Skip if not a Firebase storage URL
-  }
-
   try {
-    const storageRef = ref(storage, imageUrl);
-    await deleteObject(storageRef);
+    // Check if it's a Cloudinary URL
+    if (isCloudinaryUrl(imageUrl)) {
+      console.log('🗑️ Deleting from Cloudinary');
+      await deleteFromCloudinary(imageUrl);
+      return;
+    }
+    
+    // Check if it's a Firebase Storage URL (for migration cleanup)
+    if (storage && isFirebaseStorageUrl(imageUrl)) {
+      console.log('🗑️ Deleting from Firebase Storage');
+      
+      // Extract the storage path from the URL
+      const baseUrl = `https://firebasestorage.googleapis.com/v0/b/${firebaseConfig.storageBucket}/o/`;
+      if (imageUrl.startsWith(baseUrl)) {
+        const pathMatch = imageUrl.match(/\/o\/(.+?)\?/);
+        if (pathMatch && pathMatch[1]) {
+          const path = decodeURIComponent(pathMatch[1]);
+          const storageRef = ref(storage, path);
+          await deleteObject(storageRef);
+          console.log('✅ Deleted from Firebase Storage');
+          return;
+        }
+      }
+    }
+    
+    console.log('ℹ️ Image not in cloud storage, skipping deletion');
   } catch (error) {
-    console.error('Error deleting image from storage:', error);
+    console.error('⚠️ Error deleting image from storage:', error);
+    // Don't throw - deletion errors shouldn't block other operations
   }
 };
 
 export const addProduct = async (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Promise<Product> => {
   if (!db) {
-    console.warn('📝 Demo mode: Cannot save to database');
-    const mockProduct: Product = {
-      id: `demo-${Date.now()}`,
-      ...product,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return mockProduct;
+    console.error('❌ Firebase not configured. Cannot add products.');
+    throw new Error('Firebase database not initialized. Please check your configuration.');
   }
 
   // Check if user is authenticated
@@ -284,20 +305,8 @@ export const addProduct = async (product: Omit<Product, 'id' | 'created_at' | 'u
 
 export const updateProduct = async (id: string, updates: Partial<Product>): Promise<Product> => {
   if (!db) {
-    console.warn('📝 Demo mode: Cannot update database');
-    const mockProduct: Product = {
-      id,
-      name: updates.name || 'Updated Product',
-      description: updates.description || 'Updated description',
-      price: updates.price || 0,
-      category: updates.category || 'necklace',
-      function_type: updates.function_type || null,
-      image_url: updates.image_url || 'https://images.pexels.com/photos/1454168/pexels-photo-1454168.jpeg',
-      is_for_sale: updates.is_for_sale !== undefined ? updates.is_for_sale : true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    return mockProduct;
+    console.error('❌ Firebase not configured. Cannot update products.');
+    throw new Error('Firebase database not initialized. Please check your configuration.');
   }
 
   // Check if user is authenticated
@@ -325,9 +334,8 @@ export const updateProduct = async (id: string, updates: Partial<Product>): Prom
 
 export const deleteProduct = async (id: string): Promise<void> => {
   if (!db) {
-    console.warn('📝 Demo mode: Cannot delete from database');
-    console.log('Demo mode: Product deleted:', id);
-    return;
+    console.error('❌ Firebase not configured. Cannot delete products.');
+    throw new Error('Firebase database not initialized. Please check your configuration.');
   }
 
   // Check if user is authenticated

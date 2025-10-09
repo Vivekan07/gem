@@ -5,6 +5,8 @@ import AdminView from './components/AdminView';
 import LoginModal from './components/LoginModal';
 import UIShowcase from './components/UIShowcase';
 import { Gem, User, LogOut, Users, Settings } from 'lucide-react';
+// Load Cloudinary migration utilities globally
+import './utils/migrate-to-cloudinary';
 
 function App() {
   const [user, setUser] = useState<string | null>(null);

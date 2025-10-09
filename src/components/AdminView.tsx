@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getProducts, addProduct, updateProduct, deleteProduct, uploadImageToStorage, type Product, categories } from '../lib/supabase';
-import { Plus, CreditCard as Edit3, Trash2, Upload, Save, X, Package, TrendingUp, Eye, ShoppingBag } from 'lucide-react';
+import { compressImage, needsCompression, getRecommendedOptions, type CompressionResult } from '../utils/imageCompression';
+import { Plus, CreditCard as Edit3, Trash2, Upload, Save, X, Package, TrendingUp, Eye, ShoppingBag, Zap, Filter, XCircle } from 'lucide-react';
 
 const AdminView: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -11,6 +12,17 @@ const AdminView: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [compressingImage, setCompressingImage] = useState(false);
+  const [compressionResult, setCompressionResult] = useState<CompressionResult | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  // Filter products based on selected category
+  const filteredProducts = selectedCategory === 'all' 
+    ? products 
+    : products.filter(product => product.category.toLowerCase() === selectedCategory.toLowerCase());
+
+  // Get unique categories from products
+  const availableCategories = Array.from(new Set(products.map(product => product.category)));
 
   const [formData, setFormData] = useState<{
     name: string;
@@ -30,10 +42,11 @@ const AdminView: React.FC = () => {
     is_for_sale: true
   });
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setImageFile(file);
+      setCompressionResult(null);
       
       // Create preview URL
       const reader = new FileReader();
@@ -41,6 +54,22 @@ const AdminView: React.FC = () => {
         setImagePreview(e.target?.result as string);
       };
       reader.readAsDataURL(file);
+
+      // Check if compression is needed and compress automatically
+      if (needsCompression(file)) {
+        setCompressingImage(true);
+        try {
+          const recommendedOptions = getRecommendedOptions(file);
+          const result = await compressImage(file, recommendedOptions);
+          setCompressionResult(result);
+          console.log('✅ Image compressed automatically:', result);
+        } catch (error) {
+          console.error('❌ Auto-compression failed:', error);
+          // Continue with original file if compression fails
+        } finally {
+          setCompressingImage(false);
+        }
+      }
     }
   };
 
@@ -67,12 +96,14 @@ const AdminView: React.FC = () => {
     try {
       let imageUrl = formData.image_url;
       
-      // Upload image file to Firebase Storage if selected
+      // Upload image file to Cloudinary if selected
       if (imageFile) {
         setUploadingImage(true);
-        console.log('📤 Uploading image to Firebase Storage...');
+        console.log('📤 Uploading image to Cloudinary...');
         try {
-          imageUrl = await uploadImageToStorage(imageFile);
+          // Use compressed file if available, otherwise use original
+          const fileToUpload = compressionResult?.file || imageFile;
+          imageUrl = await uploadImageToStorage(fileToUpload);
           console.log('✅ Image uploaded successfully:', imageUrl);
         } catch (uploadError) {
           console.error('❌ Image upload failed:', uploadError);
@@ -153,6 +184,7 @@ const AdminView: React.FC = () => {
     setImageFile(null);
     setImagePreview('');
     setSaving(false);
+    setCompressionResult(null);
   };
 
   if (loading) {
@@ -193,8 +225,10 @@ const AdminView: React.FC = () => {
         <div className="bg-luxury-charcoal rounded-xl p-6 shadow-sm border border-luxury-gold/20">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-luxury-softWhite">Total Products</p>
-              <p className="text-2xl font-bold text-luxury-white">{products.length}</p>
+              <p className="text-sm font-medium text-luxury-softWhite">
+                {selectedCategory === 'all' ? 'Total Products' : `${selectedCategory} Products`}
+              </p>
+              <p className="text-2xl font-bold text-luxury-white">{filteredProducts.length}</p>
             </div>
             <Package className="w-8 h-8 text-luxury-gold" />
           </div>
@@ -203,7 +237,7 @@ const AdminView: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-luxury-softWhite">For Sale</p>
-              <p className="text-2xl font-bold text-green-600">{products.filter(p => p.is_for_sale).length}</p>
+              <p className="text-2xl font-bold text-green-600">{filteredProducts.filter(p => p.is_for_sale).length}</p>
             </div>
             <ShoppingBag className="w-8 h-8 text-green-500" />
           </div>
@@ -212,7 +246,7 @@ const AdminView: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-luxury-softWhite">Showcase Only</p>
-              <p className="text-2xl font-bold text-blue-600">{products.filter(p => !p.is_for_sale).length}</p>
+              <p className="text-2xl font-bold text-blue-600">{filteredProducts.filter(p => !p.is_for_sale).length}</p>
             </div>
             <Eye className="w-8 h-8 text-blue-500" />
           </div>
@@ -221,11 +255,61 @@ const AdminView: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-luxury-softWhite">Categories</p>
-              <p className="text-2xl font-bold text-luxury-gold">{categories.length}</p>
+              <p className="text-2xl font-bold text-luxury-gold">{availableCategories.length}</p>
             </div>
             <TrendingUp className="w-8 h-8 text-luxury-gold" />
           </div>
         </div>
+      </div>
+
+      {/* Category Filter */}
+      <div className="bg-luxury-charcoal rounded-xl p-6 shadow-sm border border-luxury-gold/20 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <Filter className="w-5 h-5 text-luxury-gold" />
+            <h3 className="text-lg font-semibold text-luxury-white">Filter Products</h3>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex items-center space-x-2">
+              <label htmlFor="category-filter" className="text-sm font-medium text-luxury-softWhite">
+                Category:
+              </label>
+              <select
+                id="category-filter"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="px-3 py-2 bg-luxury-black/50 border border-luxury-gold/30 rounded-lg focus:ring-2 focus:ring-luxury-gold focus:border-luxury-gold text-luxury-white transition-all duration-300 min-w-[150px]"
+              >
+                <option value="all">All Categories</option>
+                {availableCategories.map(category => (
+                  <option key={category} value={category.toLowerCase()}>
+                    {category.charAt(0).toUpperCase() + category.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {selectedCategory !== 'all' && (
+              <button
+                onClick={() => setSelectedCategory('all')}
+                className="flex items-center space-x-2 px-3 py-2 text-sm text-luxury-gold hover:text-luxury-amber border border-luxury-gold/30 rounded-lg hover:border-luxury-gold hover:bg-luxury-gold/10 transition-all duration-300"
+              >
+                <XCircle className="w-4 h-4" />
+                <span>Clear Filter</span>
+              </button>
+            )}
+          </div>
+        </div>
+        
+        {selectedCategory !== 'all' && (
+          <div className="mt-4 p-3 bg-luxury-gold/10 border border-luxury-gold/20 rounded-lg">
+            <p className="text-sm text-luxury-softWhite">
+              Showing <span className="font-semibold text-luxury-gold">{filteredProducts.length}</span> products 
+              in <span className="font-semibold text-luxury-gold">{selectedCategory}</span> category
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Add/Edit Form */}
@@ -350,28 +434,53 @@ const AdminView: React.FC = () => {
                   />
                   
                   {imagePreview && (
-                    <div className="relative">
-                      <img
-                        src={imagePreview}
-                        alt="Preview"
-                        className="w-32 h-32 object-cover rounded-lg border border-gray-200"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImageFile(null);
-                          setImagePreview('');
-                          setFormData({...formData, image_url: ''});
-                        }}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                      >
-                        ×
-                      </button>
+                    <div className="space-y-3">
+                      <div className="relative">
+                        <img
+                          src={imagePreview}
+                          alt="Preview"
+                          className="w-32 h-32 object-cover rounded-lg border border-gray-200"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImageFile(null);
+                            setImagePreview('');
+                            setFormData({...formData, image_url: ''});
+                            setCompressionResult(null);
+                          }}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      
+                      {/* Compression Status */}
+                      {compressingImage && (
+                        <div className="flex items-center space-x-2 p-3 bg-blue-500/20 border border-blue-500/30 rounded-lg">
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent"></div>
+                          <span className="text-sm text-blue-400 font-medium">Compressing image...</span>
+                        </div>
+                      )}
+                      
+                      {compressionResult && (
+                        <div className="p-3 bg-green-500/20 border border-green-500/30 rounded-lg">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <Zap className="w-4 h-4 text-green-400" />
+                            <span className="text-sm text-green-400 font-medium">Image Optimized</span>
+                          </div>
+                          <div className="text-xs text-green-300 space-y-1">
+                            <div>Size: {(compressionResult.originalSize / 1024 / 1024).toFixed(2)}MB → {(compressionResult.compressedSize / 1024 / 1024).toFixed(2)}MB</div>
+                            <div>Saved: {compressionResult.compressionRatio.toFixed(1)}% smaller</div>
+                            <div>Dimensions: {compressionResult.width}×{compressionResult.height}</div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   
                   <p className="text-sm text-luxury-muted">
-                    Upload an image file or enter an image URL above
+                    Upload an image file or enter an image URL above. Large images will be automatically compressed for optimal performance.
                   </p>
                 </div>
               </div>
@@ -387,12 +496,12 @@ const AdminView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || uploadingImage}
+                  disabled={saving || uploadingImage || compressingImage}
                   className="px-6 py-3 bg-luxury-gold text-luxury-black rounded-lg hover:bg-luxury-amber flex items-center space-x-2 shadow-lg hover:shadow-xl hover:shadow-luxury-gold/30 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-bold animate-glow"
                 >
                   <Save className="w-4 h-4" />
                   <span>
-                    {uploadingImage ? 'Uploading Image...' : saving ? 'Saving Product...' : (editingProduct ? 'Update Product' : 'Add Product')}
+                    {compressingImage ? 'Compressing Image...' : uploadingImage ? 'Uploading Image...' : saving ? 'Saving Product...' : (editingProduct ? 'Update Product' : 'Add Product')}
                   </span>
                 </button>
               </div>
@@ -425,7 +534,7 @@ const AdminView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="bg-luxury-charcoal divide-y divide-luxury-gold/10">
-              {products.map(product => (
+              {filteredProducts.map(product => (
                 <tr key={product.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
@@ -482,18 +591,36 @@ const AdminView: React.FC = () => {
         </div>
       </div>
 
-      {products.length === 0 && (
+      {filteredProducts.length === 0 && (
         <div className="text-center py-16">
           <Upload className="w-16 h-16 text-luxury-muted mx-auto mb-4" />
-          <h3 className="text-xl font-medium text-luxury-white mb-2">No products yet</h3>
-          <p className="text-luxury-softWhite mb-4">Start by adding your first jewelry product</p>
-          <button
-            type="button"
-            onClick={() => setShowAddForm(true)}
-            className="bg-luxury-gold text-luxury-black px-6 py-2 rounded-lg font-medium hover:bg-luxury-amber transition-all shadow-sm hover:shadow-md animate-glow"
-          >
-            Add Your First Product
-          </button>
+          {products.length === 0 ? (
+            <>
+              <h3 className="text-xl font-medium text-luxury-white mb-2">No products yet</h3>
+              <p className="text-luxury-softWhite mb-4">Start by adding your first jewelry product</p>
+              <button
+                type="button"
+                onClick={() => setShowAddForm(true)}
+                className="bg-luxury-gold text-luxury-black px-6 py-2 rounded-lg font-medium hover:bg-luxury-amber transition-all shadow-sm hover:shadow-md animate-glow"
+              >
+                Add Your First Product
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-xl font-medium text-luxury-white mb-2">No products found</h3>
+              <p className="text-luxury-softWhite mb-4">
+                No products found in the <span className="font-semibold text-luxury-gold">{selectedCategory}</span> category
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('all')}
+                className="bg-luxury-gold text-luxury-black px-6 py-2 rounded-lg font-medium hover:bg-luxury-amber transition-all shadow-sm hover:shadow-md animate-glow"
+              >
+                View All Products
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
