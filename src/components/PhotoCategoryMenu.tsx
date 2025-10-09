@@ -44,7 +44,7 @@ const PhotoCategoryMenu: React.FC<PhotoCategoryMenuProps> = ({
       image: '/WhatsApp Image 2025-09-29 at 17.01.23_d3b46a6b copy.jpg'
     },
      {
-      id: 'all',
+      id: 'other accessories',
       name: 'Other Accessories',
       image: '/WhatsApp Image 2025-09-29 at 16.43.38_68e91623 copy copy copy copy copy.jpg'
     }

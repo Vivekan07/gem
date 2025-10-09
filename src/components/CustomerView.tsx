@@ -81,7 +81,7 @@ const CustomerView: React.FC = () => {
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="px-4 py-3 bg-luxury-black/50 border border-luxury-gold/30 rounded-lg focus:ring-2 focus:ring-luxury-gold focus:border-luxury-gold text-luxury-white transition-all duration-300 hover:border-luxury-gold/50"
           >
-            <option value="all">Other Accessories</option>
+            <option value="all">All Categories</option>
             {categories.map(category => (
               <option key={category} value={category}>
                 {category.charAt(0).toUpperCase() + category.slice(1)}

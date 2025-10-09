@@ -88,7 +88,8 @@ export const categories = [
   'necklace',
   'aharam',
   'earings',
-  'bangles'
+  'bangles',
+  'other accessories'
 ];
 
 export const functions = [
